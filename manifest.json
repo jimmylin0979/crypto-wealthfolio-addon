@@ -1,0 +1,84 @@
+{
+  "id": "binance-wealthfolio-addon",
+  "name": "Binance Sync",
+  "version": "1.0.0",
+  "description": "Fetch Binance account balances into Wealthfolio as portfolio snapshots.",
+  "main": "dist/addon.js",
+  "sdkVersion": "3.6.2",
+  "minWealthfolioVersion": "3.6.2",
+  "enabled": true,
+  "contributes": {
+    "routes": [{ "id": "binance-wealthfolio-addon" }],
+    "links": {
+      "sidebar": [
+        {
+          "id": "binance-wealthfolio-addon",
+          "route": "binance-wealthfolio-addon",
+          "label": "Binance Sync",
+          "icon": "coins",
+          "order": 100
+        }
+      ]
+    }
+  },
+  "network": {
+    "allowedHosts": ["api.binance.com"]
+  },
+  "hostDependencies": {
+    "@tanstack/react-query": "^5.90.0",
+    "@wealthfolio/addon-sdk": "^3.6.2",
+    "@wealthfolio/ui": "^3.6.0",
+    "lucide-react": "^0.561.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "permissions": [
+    {
+      "category": "network",
+      "functions": [{ "name": "request", "isDeclared": true, "isDetected": false }],
+      "purpose": "Fetch account balances from the Binance REST API."
+    },
+    {
+      "category": "secrets",
+      "functions": [
+        { "name": "set", "isDeclared": true, "isDetected": false },
+        { "name": "get", "isDeclared": true, "isDetected": false },
+        { "name": "delete", "isDeclared": true, "isDetected": false }
+      ],
+      "purpose": "Store the Binance API key/secret in the OS keyring; the addon reads them back to sign requests locally."
+    },
+    {
+      "category": "accounts",
+      "functions": [
+        { "name": "getAll", "isDeclared": true, "isDetected": false },
+        { "name": "create", "isDeclared": true, "isDetected": false }
+      ],
+      "purpose": "List Wealthfolio accounts to map Binance balances against, and create the mapped account on request."
+    },
+    {
+      "category": "snapshots",
+      "functions": [
+        { "name": "save", "isDeclared": true, "isDetected": false }
+      ],
+      "purpose": "Write today's balance snapshot derived from Binance account balances; repeating an update overwrites the same day."
+    },
+    {
+      "category": "portfolio",
+      "functions": [
+        { "name": "recalculate", "isDeclared": true, "isDetected": false },
+        { "name": "getHoldings", "isDeclared": true, "isDetected": false },
+        { "name": "getLatestValuations", "isDeclared": true, "isDetected": false }
+      ],
+      "purpose": "Recalculate the portfolio after saving a snapshot, read back holdings to refresh their prices, and report the account value."
+    },
+    {
+      "category": "market-data",
+      "functions": [
+        { "name": "sync", "isDeclared": true, "isDetected": false }
+      ],
+      "purpose": "Refresh quotes for the crypto assets whose balances are imported."
+    }
+  ],
+  "keywords": ["wealthfolio", "addon", "binance", "sync", "crypto"],
+  "license": "MIT"
+}

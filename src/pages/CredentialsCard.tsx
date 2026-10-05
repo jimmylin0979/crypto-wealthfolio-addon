@@ -1,4 +1,4 @@
-import type { HostAPI } from '@wealthfolio/addon-sdk';
+import type { HostAPI } from "@wealthfolio/addon-sdk";
 import {
   Alert,
   AlertDescription,
@@ -11,39 +11,75 @@ import {
   CardTitle,
   Input,
   Label,
-} from '@wealthfolio/ui';
-import { useState } from 'react';
-import { SECRET_API_KEY, SECRET_API_SECRET } from '../lib/constants';
+} from "@wealthfolio/ui";
+import { useState } from "react";
+import { secretKeys } from "../lib/constants";
+import { EXCHANGE_META, type CredentialField, type ExchangeId } from "../lib/exchanges/types";
 
 export interface CredentialsCardProps {
   api: HostAPI;
   loading: boolean;
+  exchangeId: ExchangeId;
   ready: boolean;
   onSaved: () => void;
 }
+
+const FIELD_LABELS: Record<CredentialField, string> = {
+  apiKey: "API key",
+  apiSecret: "API secret",
+  passphrase: "Passphrase",
+};
+
+const FIELD_IDS: Record<CredentialField, string> = {
+  apiKey: "api-key",
+  apiSecret: "api-secret",
+  passphrase: "passphrase",
+};
+
+const EMPTY_VALUES: Record<CredentialField, string> = {
+  apiKey: "",
+  apiSecret: "",
+  passphrase: "",
+};
 
 /**
  * Credentials are written to the OS keyring through the host's Secrets API.
  * Only a boolean "saved" flag is ever read back — the stored values are never
  * rendered into an input.
  */
-export function CredentialsCard({ api, loading, ready, onSaved }: CredentialsCardProps) {
-  const [apiKey, setApiKey] = useState('');
-  const [apiSecret, setApiSecret] = useState('');
+export function CredentialsCard({
+  api,
+  loading,
+  exchangeId,
+  ready,
+  onSaved,
+}: CredentialsCardProps) {
+  const [values, setValues] = useState<Record<CredentialField, string>>(EMPTY_VALUES);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSave = apiKey.length > 0 && apiSecret.length > 0 && !saving;
+  const label = EXCHANGE_META[exchangeId].label;
+  const fields = EXCHANGE_META[exchangeId].credentialFields;
+  const canSave = !saving && fields.every((field) => values[field].length > 0);
+
+  function handleValueChange(field: CredentialField, value: string) {
+    setValues((prev) => {
+      const next: Record<CredentialField, string> = { ...prev };
+      next[field] = value;
+      return next;
+    });
+  }
 
   async function handleSave() {
     if (!canSave) return;
     setSaving(true);
     setError(null);
     try {
-      await api.secrets.set(SECRET_API_KEY, apiKey);
-      await api.secrets.set(SECRET_API_SECRET, apiSecret);
-      setApiKey('');
-      setApiSecret('');
+      const keys = secretKeys(exchangeId);
+      for (const field of fields) {
+        await api.secrets.set(keys[field], values[field]);
+      }
+      setValues(EMPTY_VALUES);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -52,17 +88,17 @@ export function CredentialsCard({ api, loading, ready, onSaved }: CredentialsCar
     }
   }
 
-  const statusLabel = loading ? 'Checking…' : ready ? 'Saved' : 'Not configured';
+  const statusLabel = loading ? "Checking…" : ready ? "Saved" : "Not configured";
 
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle>API credentials</CardTitle>
-          <Badge variant={loading || !ready ? 'secondary' : 'success'}>{statusLabel}</Badge>
+          <Badge variant={loading || !ready ? "secondary" : "success"}>{statusLabel}</Badge>
         </div>
         <CardDescription>
-          Read-only Binance API key used to fetch your current balances.
+          Read-only {label} API key used to fetch your current balances.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -71,30 +107,21 @@ export function CredentialsCard({ api, loading, ready, onSaved }: CredentialsCar
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        <div className="space-y-2">
-          <Label htmlFor="binance-api-key">API key</Label>
-          <Input
-            id="binance-api-key"
-            type="password"
-            autoComplete="off"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            disabled={saving}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="binance-api-secret">API secret</Label>
-          <Input
-            id="binance-api-secret"
-            type="password"
-            autoComplete="off"
-            value={apiSecret}
-            onChange={(e) => setApiSecret(e.target.value)}
-            disabled={saving}
-          />
-        </div>
+        {fields.map((field) => (
+          <div key={field} className="space-y-2">
+            <Label htmlFor={`${exchangeId}-${FIELD_IDS[field]}`}>{FIELD_LABELS[field]}</Label>
+            <Input
+              id={`${exchangeId}-${FIELD_IDS[field]}`}
+              type="password"
+              autoComplete="off"
+              value={values[field]}
+              onChange={(event) => handleValueChange(field, event.target.value)}
+              disabled={saving}
+            />
+          </div>
+        ))}
         <Button onClick={handleSave} disabled={!canSave}>
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? "Saving…" : "Save"}
         </Button>
         <p className="text-muted-foreground text-sm">
           Create a <strong>read-only</strong> API key with no trade or withdraw permission.

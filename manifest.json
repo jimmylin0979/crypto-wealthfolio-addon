@@ -1,8 +1,8 @@
 {
   "id": "binance-wealthfolio-addon",
-  "name": "Binance Sync",
+  "name": "Exchange Sync",
   "version": "1.0.0",
-  "description": "Fetch Binance account balances into Wealthfolio as portfolio snapshots.",
+  "description": "Fetch Binance, OKX, Bybit, and Pionex account balances into Wealthfolio as portfolio snapshots.",
   "main": "dist/addon.js",
   "sdkVersion": "3.6.2",
   "minWealthfolioVersion": "3.6.2",
@@ -14,7 +14,7 @@
         {
           "id": "binance-wealthfolio-addon",
           "route": "binance-wealthfolio-addon",
-          "label": "Binance Sync",
+          "label": "Exchange Sync",
           "icon": "coins",
           "order": 100
         }
@@ -22,7 +22,7 @@
     }
   },
   "network": {
-    "allowedHosts": ["api.binance.com"]
+    "allowedHosts": ["api.binance.com", "www.okx.com", "api.bybit.com", "api.pionex.com"]
   },
   "hostDependencies": {
     "@tanstack/react-query": "^5.90.0",
@@ -36,7 +36,7 @@
     {
       "category": "network",
       "functions": [{ "name": "request", "isDeclared": true, "isDetected": false }],
-      "purpose": "Fetch account balances from the Binance REST API."
+      "purpose": "Fetch account balances from the Binance, OKX, Bybit, and Pionex REST APIs."
     },
     {
       "category": "secrets",
@@ -45,7 +45,7 @@
         { "name": "get", "isDeclared": true, "isDetected": false },
         { "name": "delete", "isDeclared": true, "isDetected": false }
       ],
-      "purpose": "Store the Binance API key/secret in the OS keyring; the addon reads them back to sign requests locally."
+      "purpose": "Store each exchange's API key/secret (and OKX passphrase) in the OS keyring; the addon reads them back to sign requests locally."
     },
     {
       "category": "accounts",
@@ -53,14 +53,14 @@
         { "name": "getAll", "isDeclared": true, "isDetected": false },
         { "name": "create", "isDeclared": true, "isDetected": false }
       ],
-      "purpose": "List Wealthfolio accounts to map Binance balances against, and create the mapped account on request."
+      "purpose": "List Wealthfolio accounts to map each exchange's balances against, and create the mapped account on request."
     },
     {
       "category": "snapshots",
       "functions": [
         { "name": "save", "isDeclared": true, "isDetected": false }
       ],
-      "purpose": "Write today's balance snapshot derived from Binance account balances; repeating an update overwrites the same day."
+      "purpose": "Write today's balance snapshot derived from the selected exchange's account balances; repeating an update overwrites the same day."
     },
     {
       "category": "portfolio",
@@ -79,6 +79,6 @@
       "purpose": "Refresh quotes for the crypto assets whose balances are imported."
     }
   ],
-  "keywords": ["wealthfolio", "addon", "binance", "sync", "crypto"],
+  "keywords": ["wealthfolio", "addon", "binance", "okx", "bybit", "pionex", "sync", "crypto"],
   "license": "MIT"
 }

@@ -124,18 +124,32 @@ function utf8Bytes(text: string): Uint8Array {
 }
 
 function toHex(bytes: Uint8Array): string {
-  let hex = '';
+  let hex = "";
   for (let i = 0; i < bytes.length; i++) {
-    hex += bytes[i].toString(16).padStart(2, '0');
+    hex += bytes[i].toString(16).padStart(2, "0");
   }
   return hex;
 }
 
-/**
- * HMAC-SHA256 of `message` with `key`, as a lowercase hex digest.
- * Exported for tests and for the Binance request signature.
- */
-export function hmacSha256Hex(message: string, key: string): string {
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** Standard base64 (with padding) without relying on `btoa`/`Buffer`. */
+function toBase64(bytes: Uint8Array): string {
+  let base64 = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : undefined;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : undefined;
+    base64 += BASE64_ALPHABET[b0 >> 2];
+    base64 += BASE64_ALPHABET[((b0 & 0x03) << 4) | ((b1 ?? 0) >> 4)];
+    base64 += b1 === undefined ? "=" : BASE64_ALPHABET[((b1 & 0x0f) << 2) | ((b2 ?? 0) >> 6)];
+    base64 += b2 === undefined ? "=" : BASE64_ALPHABET[b2 & 0x3f];
+  }
+  return base64;
+}
+
+/** HMAC-SHA256 of `message` with `key` as raw bytes. */
+function hmacSha256(message: string, key: string): Uint8Array {
   let keyBytes = utf8Bytes(key);
   if (keyBytes.length > 64) {
     keyBytes = sha256(keyBytes);
@@ -157,5 +171,21 @@ export function hmacSha256Hex(message: string, key: string): string {
   }
   outer.set(innerDigest, 64);
 
-  return toHex(sha256(outer));
+  return sha256(outer);
+}
+
+/**
+ * HMAC-SHA256 of `message` with `key`, as a lowercase hex digest.
+ * Used by the Binance, Bybit, and Pionex request signatures.
+ */
+export function hmacSha256Hex(message: string, key: string): string {
+  return toHex(hmacSha256(message, key));
+}
+
+/**
+ * HMAC-SHA256 of `message` with `key`, as standard base64.
+ * Note the argument order: key first, message second (used by OKX).
+ */
+export function hmacSha256Base64(key: string, message: string): string {
+  return toBase64(hmacSha256(message, key));
 }

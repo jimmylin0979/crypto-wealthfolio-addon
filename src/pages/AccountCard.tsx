@@ -1,4 +1,4 @@
-import type { Account, HostAPI } from '@wealthfolio/addon-sdk';
+import type { Account, HostAPI } from "@wealthfolio/addon-sdk";
 import {
   Alert,
   AlertDescription,
@@ -9,8 +9,9 @@ import {
   CardHeader,
   CardTitle,
   Label,
-} from '@wealthfolio/ui';
-import { useState } from 'react';
+} from "@wealthfolio/ui";
+import { useState } from "react";
+import { EXCHANGE_META, type ExchangeId } from "../lib/exchanges/types";
 
 /**
  * A native `<select>` instead of `@wealthfolio/ui`'s Radix `Select` because
@@ -18,12 +19,13 @@ import { useState } from 'react';
  * Radix's listbox in jsdom. The class string matches the UI kit's input styling.
  */
 const nativeSelectClassName =
-  'border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm';
+  "border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm";
 
 export interface AccountCardProps {
   api: HostAPI;
   loading: boolean;
   accounts: Account[];
+  exchangeId: ExchangeId;
   accountId: string | null;
   onMapped: (accountId: string | null) => void;
   onAccountCreated: (account: Account) => void;
@@ -33,6 +35,7 @@ export function AccountCard({
   api,
   loading,
   accounts,
+  exchangeId,
   accountId,
   onMapped,
   onAccountCreated,
@@ -40,6 +43,7 @@ export function AccountCard({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const label = EXCHANGE_META[exchangeId].label;
   const mapped = accounts.find((account) => account.id === accountId);
 
   async function handleCreate() {
@@ -47,10 +51,10 @@ export function AccountCard({
     setError(null);
     try {
       const account = await api.accounts.create({
-        name: 'Binance',
-        accountType: 'CRYPTOCURRENCY',
-        trackingMode: 'HOLDINGS',
-        currency: 'USD',
+        name: label,
+        accountType: "CRYPTOCURRENCY",
+        trackingMode: "HOLDINGS",
+        currency: "USD",
         isDefault: false,
         isActive: true,
       });
@@ -65,19 +69,19 @@ export function AccountCard({
   }
 
   const mappingSummary = loading
-    ? 'Loading accounts…'
+    ? "Loading accounts…"
     : mapped
       ? `Currently mapped: ${mapped.name} (${mapped.currency})`
       : accountId
         ? `Currently mapped: account ${accountId} was not found.`
-        : 'No account mapped yet.';
+        : `No ${label} account mapped yet.`;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Account</CardTitle>
         <CardDescription>
-          Wealthfolio account that receives your Binance balances as a holdings snapshot.
+          Wealthfolio account that receives your {label} balances as a holdings snapshot.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -87,12 +91,12 @@ export function AccountCard({
           </Alert>
         )}
         <div className="space-y-2">
-          <Label htmlFor="binance-account">Mapped account</Label>
+          <Label htmlFor={`${exchangeId}-account`}>Mapped account</Label>
           <select
-            id="binance-account"
+            id={`${exchangeId}-account`}
             className={nativeSelectClassName}
-            value={accountId ?? ''}
-            onChange={(e) => onMapped(e.target.value || null)}
+            value={accountId ?? ""}
+            onChange={(event) => onMapped(event.target.value || null)}
             disabled={loading}
           >
             <option value="">Select an account…</option>
@@ -105,7 +109,7 @@ export function AccountCard({
           <p className="text-muted-foreground text-sm">{mappingSummary}</p>
         </div>
         <Button variant="outline" onClick={handleCreate} disabled={creating || loading}>
-          {creating ? 'Creating…' : 'Create Binance account'}
+          {creating ? "Creating…" : `Create ${label} account`}
         </Button>
       </CardContent>
     </Card>

@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { HostAPI } from '@wealthfolio/addon-sdk';
-import { readConfig, writeConfig } from './config';
-import { storageKey } from './keys';
+import { describe, expect, it, vi } from "vitest";
+import type { HostAPI } from "@wealthfolio/addon-sdk";
+import { readConfig, writeConfig, type AddonConfig } from "./config";
+import { storageKey } from "./keys";
 
 function createApi(): HostAPI {
   const stored = new Map<string, string>();
@@ -15,35 +15,86 @@ function createApi(): HostAPI {
   } as unknown as HostAPI;
 }
 
-describe('config', () => {
-  it('round-trips the mapped account under the binance.config key', async () => {
+const DEFAULT: AddonConfig = {
+  activeExchange: "binance",
+  exchanges: {
+    binance: { accountId: null },
+    okx: { accountId: null },
+    bybit: { accountId: null },
+    pionex: { accountId: null },
+  },
+};
+
+describe("config", () => {
+  it("round-trips a multi-exchange config under the binance.config key", async () => {
     const api = createApi();
+    const config: AddonConfig = {
+      activeExchange: "okx",
+      exchanges: {
+        binance: { accountId: "WF-1" },
+        okx: { accountId: "WF-2" },
+        bybit: { accountId: null },
+        pionex: { accountId: null },
+      },
+    };
 
-    await writeConfig(api, { accountId: 'WF-1' });
+    await writeConfig(api, config);
 
-    expect(api.storage.set).toHaveBeenCalledWith(
-      storageKey('config'),
-      JSON.stringify({ accountId: 'WF-1' }),
-    );
-    await expect(readConfig(api)).resolves.toEqual({ accountId: 'WF-1' });
+    expect(api.storage.set).toHaveBeenCalledWith(storageKey("config"), JSON.stringify(config));
+    await expect(readConfig(api)).resolves.toEqual(config);
   });
 
-  it('returns an unmapped config when nothing is stored', async () => {
-    await expect(readConfig(createApi())).resolves.toEqual({ accountId: null });
+  it("returns defaults when nothing is stored", async () => {
+    await expect(readConfig(createApi())).resolves.toEqual(DEFAULT);
   });
 
-  it('falls back to unmapped when the stored value is corrupt', async () => {
+  it("migrates the legacy {accountId} shape onto the Binance slot", async () => {
     const api = createApi();
-    vi.mocked(api.storage.get).mockResolvedValue('not json');
+    vi.mocked(api.storage.get).mockResolvedValue(JSON.stringify({ accountId: "WF-1" }));
 
-    await expect(readConfig(api)).resolves.toEqual({ accountId: null });
+    await expect(readConfig(api)).resolves.toEqual({
+      activeExchange: "binance",
+      exchanges: {
+        binance: { accountId: "WF-1" },
+        okx: { accountId: null },
+        bybit: { accountId: null },
+        pionex: { accountId: null },
+      },
+    });
+  });
+
+  it("falls back to defaults when the stored value is corrupt", async () => {
+    const api = createApi();
+    vi.mocked(api.storage.get).mockResolvedValue("not json");
+
+    await expect(readConfig(api)).resolves.toEqual(DEFAULT);
     expect(api.logger.error).toHaveBeenCalled();
   });
 
-  it('treats a non-string accountId as unmapped', async () => {
+  it("falls back to defaults when a legacy accountId is not a string", async () => {
     const api = createApi();
     vi.mocked(api.storage.get).mockResolvedValue(JSON.stringify({ accountId: 42 }));
 
-    await expect(readConfig(api)).resolves.toEqual({ accountId: null });
+    await expect(readConfig(api)).resolves.toEqual(DEFAULT);
+  });
+
+  it("fills missing exchanges and rejects an unknown activeExchange", async () => {
+    const api = createApi();
+    vi.mocked(api.storage.get).mockResolvedValue(
+      JSON.stringify({
+        activeExchange: "kraken",
+        exchanges: { okx: { accountId: "WF-OKX" }, binance: {} },
+      }),
+    );
+
+    await expect(readConfig(api)).resolves.toEqual({
+      activeExchange: "binance",
+      exchanges: {
+        binance: { accountId: null },
+        okx: { accountId: "WF-OKX" },
+        bybit: { accountId: null },
+        pionex: { accountId: null },
+      },
+    });
   });
 });

@@ -1,8 +1,9 @@
-import type { HostAPI } from '@wealthfolio/addon-sdk';
-import { fetchAccountBalances } from '../binance/client';
-import { SECRET_API_KEY, SECRET_API_SECRET } from '../constants';
-import { readConfig } from '../storage/config';
-import { buildSnapshot } from './mapping';
+import type { HostAPI } from "@wealthfolio/addon-sdk";
+import { secretKeys } from "../constants";
+import { getExchangeClient } from "../exchanges/registry";
+import { EXCHANGE_META, type ExchangeId } from "../exchanges/types";
+import { readConfig } from "../storage/config";
+import { buildSnapshot } from "./mapping";
 
 export interface UpdateResult {
   snapshotDate: string;
@@ -14,7 +15,7 @@ export interface UpdateResult {
 
 function todayInUserTimezone(): string {
   const now = new Date();
-  const pad = (part: number): string => String(part).padStart(2, '0');
+  const pad = (part: number): string => String(part).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
@@ -22,27 +23,38 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function runUpdate(api: HostAPI): Promise<UpdateResult> {
+export async function runUpdate(api: HostAPI, exchangeId: ExchangeId): Promise<UpdateResult> {
+  const { label, credentialFields } = EXCHANGE_META[exchangeId];
+
   const config = await readConfig(api);
-  if (config.accountId === null) {
-    throw new Error('No Binance account mapped yet');
+  const accountId = config.exchanges[exchangeId].accountId;
+  if (accountId === null) {
+    throw new Error(`No ${label} account mapped yet`);
   }
-  const accountId = config.accountId;
 
-  const apiKey = await api.secrets.get(SECRET_API_KEY);
+  const keys = secretKeys(exchangeId);
+  const apiKey = await api.secrets.get(keys.apiKey);
   if (!apiKey) {
-    throw new Error('Binance API key is missing — save it in the Binance Sync page first.');
+    throw new Error(`${label} API key is missing — save it on this page first.`);
   }
-  const apiSecret = await api.secrets.get(SECRET_API_SECRET);
+  const apiSecret = await api.secrets.get(keys.apiSecret);
   if (!apiSecret) {
-    throw new Error('Binance API secret is missing — save it in the Binance Sync page first.');
+    throw new Error(`${label} API secret is missing — save it on this page first.`);
+  }
+  let passphrase: string | undefined;
+  if (credentialFields.includes("passphrase")) {
+    passphrase = (await api.secrets.get(keys.passphrase)) ?? undefined;
+    if (!passphrase) {
+      throw new Error(`${label} API passphrase is missing — save it on this page first.`);
+    }
   }
 
-  const balances = await fetchAccountBalances(
-    (request) => api.network.request(request),
+  const client = getExchangeClient(exchangeId);
+  const balances = await client.fetchBalances((request) => api.network.request(request), {
     apiKey,
     apiSecret,
-  );
+    ...(passphrase !== undefined ? { passphrase } : {}),
+  });
 
   const { holdings, cashBalances } = buildSnapshot(balances);
 
@@ -93,7 +105,7 @@ export async function runUpdate(api: HostAPI): Promise<UpdateResult> {
   return {
     snapshotDate: todayInUserTimezone(),
     positionCount: holdings.length,
-    cashUsdTotal: cashBalances.USD ?? '0',
+    cashUsdTotal: cashBalances.USD ?? "0",
     ...(accountValue !== undefined ? { accountValue } : {}),
     warnings,
   };

@@ -1,5 +1,5 @@
 import type { SnapshotHoldingInput } from "@wealthfolio/addon-sdk";
-import type { BinanceBalance } from "../binance/client";
+import type { ExchangeBalance } from "../exchanges/types";
 
 const STABLECOINS: ReadonlySet<string> = new Set([
   "USDT",
@@ -15,20 +15,6 @@ const STABLECOINS: ReadonlySet<string> = new Set([
 
 const DECIMAL_PATTERN = /^[+-]?\d+(\.\d+)?$/;
 const ZERO_PATTERN = /^0(\.0*)?$/;
-
-// Simple Earn receipt tokens arrive from /api/v3/account as "LD" + underlying
-// (LDUSDT, LDBTC, LDHOME, ...) and have no market price of their own, so they
-// are remapped onto the underlying asset. LDO (Lido DAO) is the only real spot
-// asset whose name starts with "LD" — verified against the full
-// /api/v3/exchangeInfo listing — and must never be stripped.
-const REAL_LD_ASSETS: ReadonlySet<string> = new Set(["LDO"]);
-
-function resolveAsset(asset: string): string {
-  if (asset.length > 2 && asset.startsWith("LD") && !REAL_LD_ASSETS.has(asset)) {
-    return asset.slice(2);
-  }
-  return asset;
-}
 
 interface DecimalParts {
   negative: boolean;
@@ -72,7 +58,7 @@ export function addDecimalStrings(a: string, b: string): string {
   return frac ? `${sign}${whole}.${frac}` : `${sign}${whole}`;
 }
 
-export function buildSnapshot(balances: BinanceBalance[]): {
+export function buildSnapshot(balances: ExchangeBalance[]): {
   holdings: SnapshotHoldingInput[];
   cashBalances: Record<string, string>;
 } {
@@ -83,7 +69,7 @@ export function buildSnapshot(balances: BinanceBalance[]): {
     const quantity = addDecimalStrings(balance.free, balance.locked);
     if (ZERO_PATTERN.test(quantity)) continue;
 
-    const asset = resolveAsset(balance.asset);
+    const asset = balance.asset;
 
     if (STABLECOINS.has(asset)) {
       stablecoinTotal = addDecimalStrings(stablecoinTotal, quantity);
@@ -92,8 +78,9 @@ export function buildSnapshot(balances: BinanceBalance[]): {
 
     const existing = holdingsBySymbol.get(asset);
     if (existing) {
-      // Spot and its LD receipt remap onto the same symbol (BTC + LDBTC);
-      // merge quantities instead of emitting duplicate holdings rows.
+      // Clients merge several endpoints, so the same asset can arrive as
+      // multiple rows (OKX trading + funding, Bybit UNIFIED + FUND); merge
+      // quantities instead of emitting duplicate holdings rows.
       existing.quantity = addDecimalStrings(existing.quantity, quantity);
       continue;
     }

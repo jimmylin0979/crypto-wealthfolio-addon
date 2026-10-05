@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { BinanceBalance } from "../binance/client";
+import type { ExchangeBalance } from "../exchanges/types";
 import { addDecimalStrings, buildSnapshot } from "./mapping";
 
-function balance(asset: string, free: string, locked: string): BinanceBalance {
+function balance(asset: string, free: string, locked: string): ExchangeBalance {
   return { asset, free, locked };
 }
 
@@ -83,54 +83,24 @@ describe("buildSnapshot", () => {
     ]);
   });
 
-  it("strips the Simple Earn LD prefix onto the underlying asset", () => {
-    const { holdings, cashBalances } = buildSnapshot([
-      balance("LDBTC", "0.02", "0"),
-      balance("LDHOME", "141.20513310", "0"),
-      balance("LDWBETH", "0.00000001", "0"),
-    ]);
-
-    expect(holdings.map((h) => ({ symbol: h.symbol, quantity: h.quantity }))).toEqual([
-      { symbol: "BTC", quantity: "0.02" },
-      { symbol: "HOME", quantity: "141.2051331" },
-      { symbol: "WBETH", quantity: "0.00000001" },
-    ]);
-    expect(holdings.every((h) => h.instrumentType === "CRYPTO")).toBe(true);
-    expect(cashBalances).toEqual({});
-  });
-
-  it("routes LD stablecoin receipts into cash, merged with spot stablecoins", () => {
+  it("merges stablecoin rows from several endpoints into one cash total", () => {
     const { holdings, cashBalances } = buildSnapshot([
       balance("USDT", "0.10958000", "0"),
-      balance("LDUSDT", "1142.51025178", "0"),
-      balance("LDUSDC", "272.03719455", "0"),
+      balance("USDT", "1142.51025178", "0"),
+      balance("USDC", "272.03719455", "0"),
     ]);
 
     expect(holdings).toEqual([]);
     expect(cashBalances).toEqual({ USD: "1414.65702633" });
   });
 
-  it("merges a spot balance with its LD receipt into one holding", () => {
+  it("merges duplicate asset rows into one holding", () => {
     const { holdings } = buildSnapshot([
       balance("BTC", "0.00000006", "0"),
-      balance("LDBTC", "0.02234838", "0"),
+      balance("BTC", "0.02234838", "0"),
     ]);
 
     expect(holdings).toHaveLength(1);
     expect(holdings[0]).toMatchObject({ symbol: "BTC", quantity: "0.02234844" });
-  });
-
-  it("never strips LDO, which is a real spot asset", () => {
-    const { holdings } = buildSnapshot([balance("LDO", "3", "0")]);
-
-    expect(holdings).toHaveLength(1);
-    expect(holdings[0]).toMatchObject({ symbol: "LDO", quantity: "3" });
-  });
-
-  it("keeps a bare LD symbol intact", () => {
-    const { holdings } = buildSnapshot([balance("LD", "2", "0")]);
-
-    expect(holdings).toHaveLength(1);
-    expect(holdings[0]).toMatchObject({ symbol: "LD", quantity: "2" });
   });
 });

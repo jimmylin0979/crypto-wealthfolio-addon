@@ -1,4 +1,4 @@
-import type { HostAPI } from '@wealthfolio/addon-sdk';
+import type { HostAPI } from "@wealthfolio/addon-sdk";
 import {
   Alert,
   AlertDescription,
@@ -8,46 +8,79 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@wealthfolio/ui';
-import { Loader2, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
-import { runUpdate, type UpdateResult } from '../lib/sync/run';
+} from "@wealthfolio/ui";
+import { Loader2, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { EXCHANGE_META, type ExchangeId } from "../lib/exchanges/types";
+import { runUpdate, type UpdateResult } from "../lib/sync/run";
 
 export interface UpdatePanelProps {
   api: HostAPI;
   loading: boolean;
+  exchangeId: ExchangeId;
   accountId: string | null;
   credentialsReady: boolean;
 }
 
-export function UpdatePanel({ api, loading, accountId, credentialsReady }: UpdatePanelProps) {
-  const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<UpdateResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+export function UpdatePanel({
+  api,
+  loading,
+  exchangeId,
+  accountId,
+  credentialsReady,
+}: UpdatePanelProps) {
+  const [pendingExchange, setPendingExchange] = useState<ExchangeId | null>(null);
+  const [results, setResults] = useState<Partial<Record<ExchangeId, UpdateResult>>>({});
+  const [errors, setErrors] = useState<Partial<Record<ExchangeId, string>>>({});
+
+  const label = EXCHANGE_META[exchangeId].label;
+  const article = /^[AEIOU]/i.test(label) ? "an" : "a";
+  // Results, warnings, and errors are keyed per exchange so switching tabs
+  // shows each exchange's own last outcome instead of someone else's.
+  const result = results[exchangeId];
+  const error = errors[exchangeId] ?? null;
+  const pending = pendingExchange === exchangeId;
+  const busy = pendingExchange !== null;
 
   const missingSteps: string[] = [];
-  if (!credentialsReady) missingSteps.push('save your API credentials');
-  if (accountId === null) missingSteps.push('map a Binance account');
+  if (!credentialsReady) missingSteps.push(`save your ${label} API credentials`);
+  if (accountId === null) missingSteps.push(`map ${article} ${label} account`);
   const blockedReason = loading
-    ? 'Loading configuration…'
+    ? "Loading configuration…"
     : missingSteps.length > 0
-      ? `To enable Update, ${missingSteps.join(' and ')} below.`
+      ? `To enable Update, ${missingSteps.join(" and ")} below.`
       : null;
 
   async function handleUpdate() {
-    setPending(true);
-    setError(null);
-    setResult(null);
+    setPendingExchange(exchangeId);
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[exchangeId];
+      return next;
+    });
+    setResults((prev) => {
+      const next = { ...prev };
+      delete next[exchangeId];
+      return next;
+    });
     try {
-      const update = await runUpdate(api);
-      setResult(update);
+      const update = await runUpdate(api, exchangeId);
+      setResults((prev) => {
+        const next: Partial<Record<ExchangeId, UpdateResult>> = { ...prev };
+        next[exchangeId] = update;
+        return next;
+      });
       api.toast.success(`Updated ${update.positionCount} positions for ${update.snapshotDate}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setError(message);
+      setErrors((prev) => {
+        const next: Partial<Record<ExchangeId, string>> = { ...prev };
+        next[exchangeId] = message;
+        return next;
+      });
       api.toast.error(message);
     } finally {
-      setPending(false);
+      setPendingExchange(null);
     }
   }
 
@@ -56,7 +89,7 @@ export function UpdatePanel({ api, loading, accountId, credentialsReady }: Updat
       <CardHeader>
         <CardTitle>Update</CardTitle>
         <CardDescription>
-          Fetch your current Binance balances and import them into Wealthfolio.
+          Fetch your current {label} balances and import them into Wealthfolio.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -66,7 +99,7 @@ export function UpdatePanel({ api, loading, accountId, credentialsReady }: Updat
           </Alert>
         )}
         <div className="flex flex-wrap items-center gap-3">
-          <Button size="lg" onClick={handleUpdate} disabled={pending || blockedReason !== null}>
+          <Button size="lg" onClick={handleUpdate} disabled={busy || blockedReason !== null}>
             {pending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -81,7 +114,7 @@ export function UpdatePanel({ api, loading, accountId, credentialsReady }: Updat
           </Button>
           {blockedReason && <p className="text-muted-foreground text-sm">{blockedReason}</p>}
           {pending && (
-            <p className="text-muted-foreground text-sm">Fetching balances from Binance…</p>
+            <p className="text-muted-foreground text-sm">Fetching balances from {label}…</p>
           )}
         </div>
         {result && <ResultSummary result={result} />}

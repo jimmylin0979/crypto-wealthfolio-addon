@@ -19,8 +19,19 @@ no separate service to deploy.
   | Binance  | `GET https://api.binance.com/api/v3/account`                                                                               | HMAC-SHA256 hex query `signature`, header `X-MBX-APIKEY`, `recvWindow=5000`         |
   | OKX      | `GET /api/v5/account/balance` + `GET /api/v5/asset/balances` on `www.okx.com`                                              | HMAC-SHA256 **base64** `OK-ACCESS-SIGN`, ISO-8601 `OK-ACCESS-TIMESTAMP`, passphrase |
   | Bybit    | `GET /v5/account/wallet-balance?accountType=UNIFIED` + `…/query-account-coins-balance?accountType=FUND` on `api.bybit.com` | HMAC-SHA256 hex `X-BAPI-SIGN` over `timestamp + apiKey + recvWindow + queryString`  |
-  | Pionex   | `GET https://api.pionex.com/api/v1/account/balances`                                                                       | HMAC-SHA256 hex `PIONEX-SIGNATURE` over `GET<path>?timestamp=<ms>`                  |
+  | Pionex   | `GET /api/v1/account/balances` + `GET /api/v1/bot/orders` (spot grid) on `api.pionex.com`                                  | HMAC-SHA256 hex `PIONEX-SIGNATURE` over `GET<path>?<sorted-query>`                  |
 
+- **Trading-bot funds are included.** Running spot-grid bots hold coins outside
+  the plain balance endpoints, so the Update accounts for them per exchange:
+  **Pionex** explicitly excludes bot funds from its balance response, so the
+  Update reads `GET /api/v1/bot/orders?status=running` and merges
+  `buOrderData.baseAmount` + `buOrderData.quoteAmount` into the same snapshot
+  (additive — no double-counting). **OKX** needs no extra request: the trading
+  balance endpoint already reports bot funds as strategy equity inside
+  `frozenBal` (verified live), so they arrive with the normal rows — merging
+  `tradingBot` details on top would double-count them. **Binance and Bybit
+  expose no official API to list bots** (see
+  [Known limitations](#known-limitations)).
 - **Stablecoins** (`USDT`, `USDC`, `FDUSD`, `TUSD`, `DAI`, `USDP`, `PYUSD`,
   `BUSD`, `USD1`) → imported as **USD cash** at the 1:1 peg, so no price feed is
   needed for them.
@@ -64,7 +75,9 @@ endpoints listed above — it cannot trade or withdraw even if the key allowed i
 - **Bybit** — **Account & Security → API Management** → create an API key with
   **Read only** permission. Copy the API key and secret.
 - **Pionex** — **Account → API Management** (`www.pionex.com/my-account/api`) →
-  **Create API** with **Enable reading** only. Copy the API key and secret.
+  **Create API** with **Enable reading** _and_ **Bot reading** both checked —
+  the bot-order endpoint requires `Bot reading` separately; a read-only key
+  without it makes Update fail on the bot request. Copy the API key and secret.
 
 IP restriction is optional; if you enable it, include the public IP of the
 machine that runs Wealthfolio (or your self-hosted server), because the signed
@@ -227,11 +240,36 @@ account, permissions) instead.
 
 `npx pnpm test` covers: HMAC-SHA256 against RFC 4231 test vectors (hex and
 base64), per-exchange request signing and error shaping (Binance, OKX, Bybit,
-Pionex fixtures), balance filtering, exact decimal-string addition, the balance
-→ snapshot mapping (stablecoins → cash, Binance `LD*` receipts → underlying,
-`LDO` kept, `instrumentType: 'CRYPTO'`), `runUpdate` orchestration against a
-mocked `HostAPI`, per-exchange config persistence with legacy migration, and the
-page's disabled-until-configured behavior.
+Pionex fixtures), Pionex spot-grid bot merging (pagination + per-page
+signatures + page cap), balance filtering, exact decimal-string addition, the
+balance → snapshot mapping (stablecoins → cash, Binance `LD*` receipts →
+underlying, `LDO` kept, `instrumentType: 'CRYPTO'`), `runUpdate` orchestration
+against a mocked `HostAPI`, per-exchange config persistence with legacy
+migration, and the page's disabled-until-configured behavior.
+
+Set `LIVE_VERIFY=1` to additionally run `src/test/live-verify.test.ts`, which
+calls the real exchange APIs with credentials from `.env` (never runs in CI —
+skipped otherwise).
+
+## Known limitations
+
+- **Binance** has no official API for listing trading bots (grid/DCA), so bot
+  funds are not synced — only spot balances.
+- **Bybit**'s grid API (`POST /v5/grid/query-grid-detail`) fetches a single bot
+  by its known `grid_id`; there is no list endpoint, so bots cannot be
+  discovered and their funds are not synced.
+- **OKX** spot-grid funds need no extra API call — they are reported inside the
+  standard trading balance response (strategy equity in `frozenBal`); positions
+  held outside the spot balance endpoint (e.g. contract/futures grids) are not
+  synced.
+- **Pionex** syncs running **spot-grid** bots only; other bot types are out of
+  scope.
+- **Pionex Earn** (savings) products are excluded by the balance endpoint and
+  are not synced — only spot balances plus running spot-grid bots.
+- Pionex bot holdings are added as `locked` amounts with `free: "0"` (OKX bot
+  funds already arrive inside the trading rows' `frozenBal`); the snapshot's
+  mapping sums duplicate assets, but per-bot detail (which bot holds what) is
+  not preserved.
 
 ## Security
 

@@ -53,7 +53,10 @@ export function buildBalanceRequests(
 /**
  * Fetch trading (`/api/v5/account/balance`) and funding
  * (`/api/v5/asset/balances`) balances and merge both row sets; duplicate ccys
- * are left for the shared mapping to sum.
+ * are left for the shared mapping to sum. Bot/strategy funds need no extra
+ * request: OKX reports them inside the trading response (`stgyEq` sits within
+ * `frozenBal`, verified against the live API) — merging `tradingBot` rows here
+ * would double-count them.
  */
 export async function fetchBalances(
   request: NetworkRequestFn,

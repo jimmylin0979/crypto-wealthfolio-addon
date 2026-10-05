@@ -79,7 +79,7 @@ export function buildSnapshot(balances: ExchangeBalance[]): {
     const existing = holdingsBySymbol.get(asset);
     if (existing) {
       // Clients merge several endpoints, so the same asset can arrive as
-      // multiple rows (OKX trading + funding, Bybit UNIFIED + FUND); merge
+      // multiple rows (OKX trading + funding + savings, Bybit UNIFIED + FUND); merge
       // quantities instead of emitting duplicate holdings rows.
       existing.quantity = addDecimalStrings(existing.quantity, quantity);
       continue;

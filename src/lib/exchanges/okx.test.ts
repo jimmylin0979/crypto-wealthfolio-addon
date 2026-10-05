@@ -17,9 +17,11 @@ const ISO_TIMESTAMP = "2024-04-05T19:34:38.901Z";
 // base64 HMAC-SHA256 over `${ISO_TIMESTAMP}GET<path>` with API_SECRET.
 const TRADING_SIGNATURE = "4mb8itn0Rv/6RXG+krBrFLb+6Rd/4y1lABC7AYGqk0Q=";
 const FUNDING_SIGNATURE = "X98o49ezEnQqmMhc8ZAk2Pqcy9rVAYou+CyWS5xrzPw=";
+const SAVINGS_SIGNATURE = "VGislnZZsJUeEg7TB8nNKeo8yz8XM+mIRuDDFw8gyRE=";
 
 const TRADING_PATH = "/api/v5/account/balance";
 const FUNDING_PATH = "/api/v5/asset/balances";
+const SAVINGS_PATH = "/api/v5/finance/savings/balance";
 
 function respondWith(routes: Record<string, NetworkResponse>): {
   request: (req: NetworkRequest) => Promise<NetworkResponse>;
@@ -63,17 +65,41 @@ const FUNDING_RESPONSE = okxSuccess({
   ],
 });
 
+// Simple Earn flexible savings rows carry the total held in `amt`
+// (per the official docs response example: amt == loanAmt + pendingAmt).
+const SAVINGS_RESPONSE = okxSuccess({
+  code: "0",
+  data: [
+    {
+      ccy: "USDT",
+      amt: "11.0010737453457821",
+      earnings: "0.0010737388791526",
+      rate: "0.0100000000000000",
+      loanAmt: "11.0010630707982819",
+      pendingAmt: "0.0000106745475002",
+    },
+    { ccy: "BTC", amt: "0", earnings: "0", rate: "0.01" },
+  ],
+});
+
+const EMPTY_ROUTES: Record<string, NetworkResponse> = {
+  [TRADING_PATH]: okxSuccess({ code: "0", data: [] }),
+  [FUNDING_PATH]: okxSuccess({ code: "0", data: [] }),
+  [SAVINGS_PATH]: okxSuccess({ code: "0", data: [] }),
+};
+
 describe("fetchBalances", () => {
-  it("signs both requests with the injected timestamp and merges trading and funding rows", async () => {
+  it("signs all three requests with the injected timestamp and merges trading, funding and savings rows", async () => {
     const { request, sent } = respondWith({
       [TRADING_PATH]: TRADING_RESPONSE,
       [FUNDING_PATH]: FUNDING_RESPONSE,
+      [SAVINGS_PATH]: SAVINGS_RESPONSE,
     });
 
     const balances = await fetchBalances(request, CREDENTIALS, TIMESTAMP);
 
-    expect(sent).toHaveLength(2);
-    const [trading, funding] = sent;
+    expect(sent).toHaveLength(3);
+    const [trading, funding, savings] = sent;
     expect(trading.method).toBe("GET");
     expect(trading.url).toBe(`https://www.okx.com${TRADING_PATH}`);
     expect(trading.headers).toEqual({
@@ -92,17 +118,28 @@ describe("fetchBalances", () => {
       "OK-ACCESS-PASSPHRASE": PASSPHRASE,
     });
 
+    expect(savings.method).toBe("GET");
+    expect(savings.url).toBe(`https://www.okx.com${SAVINGS_PATH}`);
+    expect(savings.headers).toEqual({
+      "OK-ACCESS-KEY": API_KEY,
+      "OK-ACCESS-SIGN": SAVINGS_SIGNATURE,
+      "OK-ACCESS-TIMESTAMP": ISO_TIMESTAMP,
+      "OK-ACCESS-PASSPHRASE": PASSPHRASE,
+    });
+
     // The secret never travels with the request.
     expect(JSON.stringify(sent)).not.toContain(API_SECRET);
 
-    // Both row sets are returned; duplicate ccys (USDT) stay separate for the
-    // shared mapping to sum, and zero totals are skipped.
+    // All three row sets are returned; duplicate ccys (USDT appears in every
+    // response) stay separate for the shared mapping to sum, savings totals
+    // arrive via `amt`, and zero totals are skipped.
     expect(balances).toEqual([
       { asset: "USDT", free: "100.5", locked: "0.5" },
       { asset: "BTC", free: "0.5", locked: "0.1" },
       { asset: "USDT", free: "10", locked: "0" },
       { asset: "ETH", free: "3", locked: "0" },
       { asset: "SOL", free: "2.5", locked: "0" },
+      { asset: "USDT", free: "11.0010737453457821", locked: "0" },
     ]);
   });
 
@@ -110,6 +147,7 @@ describe("fetchBalances", () => {
     const { request } = respondWith({
       [TRADING_PATH]: okxSuccess({ code: "50113", msg: "Invalid OK-ACCESS-SIGN" }),
       [FUNDING_PATH]: FUNDING_RESPONSE,
+      [SAVINGS_PATH]: SAVINGS_RESPONSE,
     });
 
     const caught: unknown = await fetchBalances(request, CREDENTIALS, TIMESTAMP).catch(
@@ -131,6 +169,7 @@ describe("fetchBalances", () => {
         body: JSON.stringify({ code: "50113", msg: "Invalid OK-ACCESS-KEY" }),
       },
       [FUNDING_PATH]: FUNDING_RESPONSE,
+      [SAVINGS_PATH]: SAVINGS_RESPONSE,
     });
 
     const caught: unknown = await fetchBalances(request, CREDENTIALS, TIMESTAMP).catch(
@@ -146,16 +185,14 @@ describe("fetchBalances", () => {
     const { request } = respondWith({
       [TRADING_PATH]: { status: 200, headers: {}, body: "<html>gateway error</html>" },
       [FUNDING_PATH]: FUNDING_RESPONSE,
+      [SAVINGS_PATH]: SAVINGS_RESPONSE,
     });
 
     await expect(fetchBalances(request, CREDENTIALS, TIMESTAMP)).rejects.toThrow(/not valid JSON/);
   });
 
   it("fails before any request when the passphrase is missing", async () => {
-    const { request, sent } = respondWith({
-      [TRADING_PATH]: TRADING_RESPONSE,
-      [FUNDING_PATH]: FUNDING_RESPONSE,
-    });
+    const { request, sent } = respondWith(EMPTY_ROUTES);
 
     await expect(
       fetchBalances(request, { apiKey: API_KEY, apiSecret: API_SECRET }, TIMESTAMP),
@@ -166,10 +203,7 @@ describe("fetchBalances", () => {
   it("wires the client to sign with the current time", async () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(TIMESTAMP);
     try {
-      const { request, sent } = respondWith({
-        [TRADING_PATH]: okxSuccess({ code: "0", data: [] }),
-        [FUNDING_PATH]: okxSuccess({ code: "0", data: [] }),
-      });
+      const { request, sent } = respondWith(EMPTY_ROUTES);
       await okxClient.fetchBalances(request, CREDENTIALS);
       expect(sent[0]?.headers?.["OK-ACCESS-TIMESTAMP"]).toBe(ISO_TIMESTAMP);
     } finally {

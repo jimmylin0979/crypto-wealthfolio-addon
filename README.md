@@ -17,7 +17,7 @@ no separate service to deploy.
   | Exchange | Requests (per Update)                                                                                                      | Auth                                                                                |
   | -------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
   | Binance  | `GET https://api.binance.com/api/v3/account`                                                                               | HMAC-SHA256 hex query `signature`, header `X-MBX-APIKEY`, `recvWindow=5000`         |
-  | OKX      | `GET /api/v5/account/balance` + `GET /api/v5/asset/balances` on `www.okx.com`                                              | HMAC-SHA256 **base64** `OK-ACCESS-SIGN`, ISO-8601 `OK-ACCESS-TIMESTAMP`, passphrase |
+  | OKX      | `GET /api/v5/account/balance` + `GET /api/v5/asset/balances` + `GET /api/v5/finance/savings/balance` on `www.okx.com`                | HMAC-SHA256 **base64** `OK-ACCESS-SIGN`, ISO-8601 `OK-ACCESS-TIMESTAMP`, passphrase |
   | Bybit    | `GET /v5/account/wallet-balance?accountType=UNIFIED` + `…/query-account-coins-balance?accountType=FUND` on `api.bybit.com` | HMAC-SHA256 hex `X-BAPI-SIGN` over `timestamp + apiKey + recvWindow + queryString`  |
   | Pionex   | `GET /api/v1/account/balances` + `GET /api/v1/bot/orders` (spot grid) on `api.pionex.com`                                  | HMAC-SHA256 hex `PIONEX-SIGNATURE` over `GET<path>?<sorted-query>`                  |
 
@@ -31,6 +31,14 @@ no separate service to deploy.
   `frozenBal` (verified live), so they arrive with the normal rows — merging
   `tradingBot` details on top would double-count them. **Binance and Bybit
   expose no official API to list bots** (see
+  [Known limitations](#known-limitations)).
+- **Simple Earn (OKX flexible savings) is included.** Subscribed savings are
+  debited out of the funding account into a separate Earn account, so the
+  Update reads a third endpoint, `GET /api/v5/finance/savings/balance`, and
+  merges its rows additively: `amt` is the total held (principal plus accrued
+  earnings), reported with `locked: "0"`. The same ccy appearing in both the
+  funding and savings responses means disjoint amounts, not double-counting.
+  Fixed-term (定期) savings are not synced (see
   [Known limitations](#known-limitations)).
 - **Stablecoins** (`USDT`, `USDC`, `FDUSD`, `TUSD`, `DAI`, `USDP`, `PYUSD`,
   `BUSD`, `USD1`) → imported as **USD cash** at the 1:1 peg, so no price feed is
@@ -198,8 +206,10 @@ curl -s -H "PIONEX-KEY: $PIONEX_API_KEY" -H "PIONEX-SIGNATURE: $SIG" \
   "https://api.pionex.com/api/v1/account/balances?timestamp=$TS"
 ```
 
-**OKX** (two calls — trading account; add `x-simulated-trading: 1` only for demo
-keys):
+**OKX** (three calls — trading, funding, savings; add `x-simulated-trading: 1`
+only for demo keys). The same signing scheme applies to every path — swap
+`/api/v5/account/balance` for `/api/v5/asset/balances` or
+`/api/v5/finance/savings/balance` and recompute `SIG` over `${TS}GET<path>`:
 
 ```bash
 export OKX_API_KEY=...
@@ -262,6 +272,10 @@ skipped otherwise).
   standard trading balance response (strategy equity in `frozenBal`); positions
   held outside the spot balance endpoint (e.g. contract/futures grids) are not
   synced.
+- **OKX** fixed-term Simple Earn (定期) positions are not synced — only
+  flexible savings are. The old `finance/fixed-loan/*` endpoints went offline
+  on 2025-03-03, and the relaunched `finance/simple-earn-fixed/*` endpoints are
+  not yet published in OKX's public API docs.
 - **Pionex** syncs running **spot-grid** bots only; other bot types are out of
   scope.
 - **Pionex Earn** (savings) products are excluded by the balance endpoint and

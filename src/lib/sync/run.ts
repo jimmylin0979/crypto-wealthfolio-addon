@@ -110,3 +110,48 @@ export async function runUpdate(api: HostAPI, exchangeId: ExchangeId): Promise<U
     warnings,
   };
 }
+
+export type UpdateAllOutcome =
+  | { ok: true; result: UpdateResult }
+  | { ok: false; error: string };
+
+export interface UpdateAllSummary {
+  succeeded: ExchangeId[];
+  failed: { exchangeId: ExchangeId; message: string }[];
+}
+
+export interface UpdateAllCallbacks {
+  onStarted?(exchangeId: ExchangeId, index: number, total: number): void;
+  onSettled?(exchangeId: ExchangeId, outcome: UpdateAllOutcome): void;
+}
+
+/**
+ * Runs runUpdate once per exchange, one after another: exchange rate limits
+ * forbid firing every request at once. A failing exchange is recorded in
+ * `failed` and the loop moves on, so one bad key never blocks the rest.
+ */
+export async function runUpdateAll(
+  api: HostAPI,
+  exchangeIds: ExchangeId[],
+  callbacks?: UpdateAllCallbacks,
+): Promise<UpdateAllSummary> {
+  const succeeded: ExchangeId[] = [];
+  const failed: { exchangeId: ExchangeId; message: string }[] = [];
+  const total = exchangeIds.length;
+
+  for (let index = 0; index < total; index += 1) {
+    const exchangeId = exchangeIds[index];
+    callbacks?.onStarted?.(exchangeId, index, total);
+    try {
+      const result = await runUpdate(api, exchangeId);
+      succeeded.push(exchangeId);
+      callbacks?.onSettled?.(exchangeId, { ok: true, result });
+    } catch (error) {
+      const message = errorMessage(error);
+      failed.push({ exchangeId, message });
+      callbacks?.onSettled?.(exchangeId, { ok: false, error: message });
+    }
+  }
+
+  return { succeeded, failed };
+}

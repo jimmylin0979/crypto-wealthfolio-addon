@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountValuation, Holding, HostAPI } from "@wealthfolio/addon-sdk";
 import { getExchangeClient } from "../exchanges/registry";
 import type { ExchangeBalance, ExchangeClient, ExchangeId } from "../exchanges/types";
-import { runUpdate } from "./run";
+import { runUpdate, runUpdateAll } from "./run";
 
 vi.mock("../exchanges/registry", () => ({
   getExchangeClient: vi.fn(),
@@ -55,6 +55,28 @@ function mappedApi(): HostAPI {
     key === "binance.apiKey" ? "test-key" : key === "binance.apiSecret" ? "test-secret" : null,
   );
   return api;
+}
+
+function multiMappedApi(): HostAPI {
+  const api = createApi();
+  vi.mocked(api.storage.get).mockResolvedValue(
+    configJson({ binance: ACCOUNT_ID, okx: "WF-OKX-1" }),
+  );
+  vi.mocked(api.secrets.get).mockImplementation(async (key: string) =>
+    key === "okx.passphrase"
+      ? "test-passphrase"
+      : key.endsWith(".apiKey") || key.endsWith(".apiSecret")
+        ? "test-value"
+        : null,
+  );
+  return api;
+}
+
+function mockAnyClient(balances: ExchangeBalance[]) {
+  vi.mocked(getExchangeClient).mockImplementation((exchangeId: ExchangeId) => ({
+    id: exchangeId,
+    fetchBalances: async () => balances,
+  }));
 }
 
 function mockClient(exchangeId: ExchangeId, balances: ExchangeBalance[]) {
@@ -210,5 +232,103 @@ describe("runUpdate", () => {
 
     await expect(runUpdate(api, "binance")).rejects.toThrow(/Invalid API-key/);
     expect(api.snapshots.save).not.toHaveBeenCalled();
+  });
+});
+
+describe("runUpdateAll", () => {
+  it("syncs the given exchanges strictly one at a time and reports all as succeeded", async () => {
+    const api = multiMappedApi();
+    const timeline: string[] = [];
+    let releaseBinance!: () => void;
+    const binanceGate = new Promise<void>((resolve) => {
+      releaseBinance = resolve;
+    });
+    vi.mocked(getExchangeClient).mockImplementation((exchangeId: ExchangeId) => ({
+      id: exchangeId,
+      fetchBalances: async () => {
+        if (exchangeId === "binance") {
+          timeline.push("binance:start");
+          await binanceGate;
+          timeline.push("binance:end");
+        } else {
+          timeline.push("okx:start");
+          timeline.push("okx:end");
+        }
+        return [{ asset: "USDT", free: "5", locked: "0" }];
+      },
+    }));
+
+    const summaryPromise = runUpdateAll(api, ["binance", "okx"]);
+    // Drain the microtask queue: a parallel run would already have started
+    // OKX while Binance's fetch is gated, a sequential one must not have.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(timeline).toEqual(["binance:start"]);
+
+    releaseBinance();
+    const summary = await summaryPromise;
+
+    expect(timeline).toEqual(["binance:start", "binance:end", "okx:start", "okx:end"]);
+    expect(summary.succeeded).toEqual(["binance", "okx"]);
+    expect(summary.failed).toEqual([]);
+    expect(api.snapshots.save).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates a failing exchange so later ones still run", async () => {
+    const api = createApi();
+    vi.mocked(api.storage.get).mockResolvedValue(
+      configJson({ binance: ACCOUNT_ID, okx: "WF-OKX-1" }),
+    );
+    vi.mocked(api.secrets.get).mockImplementation(async (key: string) =>
+      key === "okx.passphrase"
+        ? "test-passphrase"
+        : key.startsWith("okx.")
+          ? "test-value"
+          : null,
+    );
+    mockAnyClient([{ asset: "USDT", free: "5", locked: "0" }]);
+
+    const summary = await runUpdateAll(api, ["binance", "okx"]);
+
+    expect(summary.succeeded).toEqual(["okx"]);
+    expect(summary.failed).toEqual([
+      { exchangeId: "binance", message: expect.stringMatching(/API key is missing/) },
+    ]);
+    expect(getExchangeClient).toHaveBeenCalledWith("okx");
+    expect(api.snapshots.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires onStarted and onSettled once per exchange, in order", async () => {
+    const api = multiMappedApi();
+    mockAnyClient([{ asset: "USDT", free: "5", locked: "0" }]);
+    const events: string[] = [];
+
+    const summary = await runUpdateAll(api, ["binance", "okx"], {
+      onStarted: (exchangeId, index, total) =>
+        events.push(`start ${exchangeId} ${index}/${total}`),
+      onSettled: (exchangeId, outcome) =>
+        events.push(
+          outcome.ok
+            ? `settle ${exchangeId} ok:${outcome.result.cashUsdTotal}`
+            : `settle ${exchangeId} err:${outcome.error}`,
+        ),
+    });
+
+    expect(events).toEqual([
+      "start binance 0/2",
+      "settle binance ok:5",
+      "start okx 1/2",
+      "settle okx ok:5",
+    ]);
+    expect(summary.succeeded).toEqual(["binance", "okx"]);
+  });
+
+  it("returns an empty summary without running anything for an empty exchange list", async () => {
+    const api = multiMappedApi();
+
+    const summary = await runUpdateAll(api, []);
+
+    expect(summary).toEqual({ succeeded: [], failed: [] });
+    expect(api.storage.get).not.toHaveBeenCalled();
+    expect(getExchangeClient).not.toHaveBeenCalled();
   });
 });

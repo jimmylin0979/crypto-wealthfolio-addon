@@ -1,10 +1,10 @@
 import type { Account, HostAPI } from "@wealthfolio/addon-sdk";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { secretKeys } from "../lib/constants";
 import { EXCHANGE_META, type ExchangeId } from "../lib/exchanges/types";
-import { runUpdate } from "../lib/sync/run";
+import { runUpdate, runUpdateAll, type UpdateAllSummary } from "../lib/sync/run";
 import { storageKey } from "../lib/storage/keys";
 import { SyncPage } from "./SyncPage";
 
@@ -16,6 +16,9 @@ vi.mock("../lib/sync/run", () => ({
     accountValue: "5678.90",
     warnings: ["Price refresh failed: provider offline"],
   })),
+  runUpdateAll: vi.fn(
+    async (): Promise<UpdateAllSummary> => ({ succeeded: [], failed: [] }),
+  ),
 }));
 
 // Partial HostAPI stand-in: only the domains SyncPage touches. Same pattern as
@@ -267,5 +270,75 @@ describe("SyncPage", () => {
     expect(await screen.findByText("Currently mapped: OKX (USD)")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /update/i }));
     await waitFor(() => expect(runUpdate).toHaveBeenCalledWith(api, "okx"));
+  });
+
+  it("disables Sync All and shows a hint while nothing is configured", async () => {
+    const { api } = createApi();
+
+    render(<SyncPage api={api} />);
+
+    expect(await screen.findByRole("button", { name: "Sync All" })).toBeDisabled();
+    expect(
+      await screen.findByText(
+        "No configured exchanges yet — save credentials and map an account first.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("runs Sync All over exactly the exchanges with credentials and a mapped account", async () => {
+    const { api, storage, secrets } = createApi();
+    seedConfig(storage, "binance", {
+      binance: { accountId: "acc-1" },
+      bybit: { accountId: "acc-3" },
+    });
+    seedCredentials(secrets, "binance");
+    seedCredentials(secrets, "okx"); // credentials but no account → not eligible
+    api.accounts.getAll = vi.fn(async () => [makeAccount()]);
+
+    render(<SyncPage api={api} />);
+
+    await screen.findByText("Currently mapped: Binance (USD)");
+    const syncAllButton = screen.getByRole("button", { name: "Sync All" });
+    expect(syncAllButton).toBeEnabled();
+    await userEvent.click(syncAllButton);
+
+    // Only Binance has both prerequisites: OKX lacks an account, Bybit lacks credentials.
+    await waitFor(() =>
+      expect(runUpdateAll).toHaveBeenCalledWith(api, ["binance"], expect.anything()),
+    );
+    expect(runUpdateAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Sync All, Update, and shows progress while a sync-all run is active", async () => {
+    const { api, storage, secrets } = createApi();
+    seedConfig(storage, "binance", { binance: { accountId: "acc-1" } });
+    seedCredentials(secrets, "binance");
+    api.accounts.getAll = vi.fn(async () => [makeAccount()]);
+
+    let finish!: (summary: UpdateAllSummary) => void;
+    vi.mocked(runUpdateAll).mockImplementationOnce(
+      (_api, _exchangeIds, callbacks) => {
+        callbacks?.onStarted?.("binance", 0, 1);
+        return new Promise<UpdateAllSummary>((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+
+    render(<SyncPage api={api} />);
+
+    await screen.findByText("Currently mapped: Binance (USD)");
+    await userEvent.click(screen.getByRole("button", { name: "Sync All" }));
+
+    expect(await screen.findByRole("button", { name: /Syncing/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Updat/ })).toBeDisabled();
+    expect(await screen.findByText("Syncing Binance… (1/1)")).toBeInTheDocument();
+
+    await act(async () => {
+      finish({ succeeded: ["binance"], failed: [] });
+    });
+
+    expect(await screen.findByRole("button", { name: "Sync All" })).toBeEnabled();
+    expect(api.toast.success).toHaveBeenCalledWith("Synced 1 exchange(s).");
   });
 });

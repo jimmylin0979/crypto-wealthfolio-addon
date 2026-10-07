@@ -86,6 +86,13 @@ export function SyncPage({ api }: SyncPageProps) {
   const activeExchange = state.config.activeExchange;
   const activeLabel = EXCHANGE_META[activeExchange].label;
   const activeAccountId = state.config.exchanges?.[activeExchange]?.accountId ?? null;
+  // Sync All only touches exchanges runUpdate could succeed for: saved
+  // credentials and a mapped Wealthfolio account, both required.
+  const syncableExchanges = EXCHANGE_IDS.filter(
+    (exchangeId) =>
+      state.credentialsReady[exchangeId] === true &&
+      (state.config.exchanges?.[exchangeId]?.accountId ?? null) !== null,
+  );
 
   async function handleSelectExchange(exchangeId: ExchangeId) {
     if (exchangeId === state.config.activeExchange) return;
@@ -158,6 +165,7 @@ export function SyncPage({ api }: SyncPageProps) {
             exchangeId={activeExchange}
             accountId={activeAccountId}
             credentialsReady={state.credentialsReady[activeExchange]}
+            syncableExchanges={syncableExchanges}
           />
           {EXCHANGE_IDS.map((exchangeId) => (
             <TabsContent key={exchangeId} value={exchangeId} className="mt-0">

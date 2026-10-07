@@ -1,6 +1,11 @@
 # Created by https://www.toptal.com/developers/gitignore/api/rust,node
 # Edit at https://www.toptal.com/developers/gitignore?templates=rust,node
 
+### Crypto-wealthfolio-addon ###
+# AI 
+.omo
+AGENTS.md
+
 ### Node ###
 # Logs
 logs
